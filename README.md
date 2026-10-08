@@ -1,6 +1,8 @@
 # boxy
 Python based boxcar that can be used in ansible
 
+**Full documentation with use cases: [docs/USER-GUIDE.md](docs/USER-GUIDE.md).**
+
 Protects keys, certificates and PEM files at rest on the Ansible control node
 with an operator-supplied password, and installs them on managed hosts.
 Inspired by the Go `boxcar` tool but an independent, Ansible-native
