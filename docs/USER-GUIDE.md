@@ -87,7 +87,8 @@ directory into `./collections`. Alternatively copy the collection to
 tools/ansible-boxcar seal files/tls.box ./certs --mode '*.crt=0644'
 ```
 
-You are prompted for a password twice. Every file defaults to mode `0600`; the
+You are prompted for a password twice (or let the tool create a strong one for
+you with `--generate`; see below). Every file defaults to mode `0600`; the
 `--mode` option sets a different mode for names matching a pattern. Check the
 result (no password needed):
 
@@ -260,7 +261,7 @@ Otherwise omit `vars_prompt` and `password:` and rely on `BOXCAR_PASSWORD`.
 *Situation:* nobody wants to invent a strong password or keep it in a CI
 secret.
 
-*Do:* generate the bundle password and keep it in a SOPS-encrypted file that
+*Do:* seal with `--generate` so the tool creates the bundle password, and keep it in a SOPS-encrypted file that
 each operator and CI job opens with its own age key; the playbook reads it with
 the `community.sops.sops` lookup and passes it to `unbox`. Adding or removing a
 person is then a change to the recipient list, not a shared-password change.
@@ -303,7 +304,8 @@ Built-in help: `ansible-boxcar --help` lists the commands with examples, and
 options and examples of one command.
 
 ```
-ansible-boxcar seal BUNDLE PATH [PATH ...] [--mode PATTERN=MODE ...] [--force]
+ansible-boxcar seal BUNDLE PATH [PATH ...] [--mode PATTERN=MODE ...]
+                    [--generate [--password-file FILE]] [--force]
 ansible-boxcar unbox BUNDLE DEST [--entry NAME ...] [--force]
 ansible-boxcar list BUNDLE
 ```
@@ -316,6 +318,16 @@ ansible-boxcar list BUNDLE
   overwritten.
 - Password: at least 8 characters, entered twice. A warning is shown below 16.
   `BOXCAR_PASSWORD` can supply it for non-interactive use.
+- `--generate` creates the password for you (43 random URL-safe characters,
+  256 bits) and does not prompt, so nobody has to invent a strong password.
+  By default it is printed once on stdout (and nothing else is, so
+  `PW="$(ansible-boxcar seal ... --generate)"` captures just the password;
+  status messages go to stderr). With `--password-file FILE` it is written to
+  `FILE` (mode `0600`) instead and not printed. The password is revealed only
+  after the bundle has been saved, so a failure never leaves you with a bundle
+  and no password. It is shown once and cannot be recovered: store it at once.
+  `--generate` cannot be combined with `$BOXCAR_PASSWORD`, and an existing
+  password file is not overwritten without `--force`.
 - `unbox` decrypts the bundle into the local folder `DEST` (created with mode
   `0700` if missing), using the modes recorded in the bundle. The password is
   asked once. Nothing is written unless the password and **every** entry
@@ -346,9 +358,9 @@ destination, mode, changed). It never returns file content.
   output.
 - **Never use `--diff`** with this module; it refuses to run, because a diff
   would print decrypted content.
-- **Choose a strong passphrase** (16+ characters). The bundle can be attacked
-  offline by anyone who gets a copy; scrypt slows guessing but cannot save a
-  weak password.
+- **Prefer `seal --generate`** over choosing a password yourself. The bundle can
+  be attacked offline by anyone who gets a copy; scrypt slows guessing but
+  cannot save a weak password. If you do type one, make it 16+ characters.
 - **Keep the password out of the repo and out of the bundle's directory.** Use
   a password manager. Losing the password means re-sealing from the sources.
 - **Keep the plaintext sources protected** and delete working copies when done.

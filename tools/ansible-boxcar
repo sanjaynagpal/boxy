@@ -84,16 +84,64 @@ def _parse_mode_rule(text):
         raise argparse.ArgumentTypeError(str(exc)) from None
 
 
+def _stage_secret_file(path, data: bytes) -> str:
+    """Write data to a 0600 temp file beside path; the caller commits it with os.replace."""
+    fd, tmp = tempfile.mkstemp(prefix=".boxcar-", suffix=".tmp",
+                               dir=os.path.dirname(os.path.abspath(path)))
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+    except BaseException:
+        os.unlink(tmp)
+        raise
+    return tmp
+
+
 def cmd_seal(args) -> int:
+    if args.password_file and not args.generate:
+        raise bundle.BundleError("--password-file only makes sense with --generate")
+    if args.generate and os.environ.get("BOXCAR_PASSWORD"):
+        raise bundle.BundleError("--generate cannot be combined with $BOXCAR_PASSWORD")
     if os.path.exists(args.bundle) and not args.force:
         raise bundle.BundleError("%s already exists (use --force to replace it)" % args.bundle)
+    if args.password_file and os.path.exists(args.password_file) and not args.force:
+        raise bundle.BundleError("%s already exists (use --force to replace it)" % args.password_file)
     entries = _collect(args.paths, args.mode)
-    password = _read_password(confirm=True)
-    if bundle.is_weak_password(password):
-        print("warning: password is shorter than %d characters; a longer passphrase is "
-              "recommended" % bundle.RECOMMENDED_PASSWORD_LEN, file=sys.stderr)
-    bundle.save(args.bundle, bundle.seal(entries, password))
-    print("sealed %d file(s) into %s" % (len(entries), args.bundle))
+
+    if not args.generate:
+        password = _read_password(confirm=True)
+        if bundle.is_weak_password(password):
+            print("warning: password is shorter than %d characters; a longer passphrase is "
+                  "recommended" % bundle.RECOMMENDED_PASSWORD_LEN, file=sys.stderr)
+        bundle.save(args.bundle, bundle.seal(entries, password))
+        print("sealed %d file(s) into %s" % (len(entries), args.bundle))
+        return 0
+
+    # Generated password: nothing is revealed or stored until the bundle is safely
+    # on disk, so a failure can never leave a bundle whose password is lost.
+    password = bundle.generate_password()
+    doc = bundle.seal(entries, password.encode("utf-8"))
+    staged = None
+    if args.password_file:
+        staged = _stage_secret_file(args.password_file, (password + "\n").encode("utf-8"))
+    try:
+        bundle.save(args.bundle, doc)
+        if staged:
+            os.replace(staged, args.password_file)
+            staged = None
+    finally:
+        if staged and os.path.exists(staged):
+            os.unlink(staged)
+    # Status goes to stderr so stdout carries only the password:
+    #   PW=$(ansible-boxcar seal ... --generate)
+    print("sealed %d file(s) into %s with a generated password" % (len(entries), args.bundle),
+          file=sys.stderr)
+    if args.password_file:
+        print("password written to %s (mode 0600)" % args.password_file, file=sys.stderr)
+    else:
+        if sys.stdout.isatty():
+            print("save this password now; it cannot be shown again:", file=sys.stderr)
+        print(password)
     return 0
 
 
@@ -167,12 +215,16 @@ environment:
 exit status: 0 success, 1 error (message on stderr), 2 usage error.
 """
 
-SEAL_DESCRIPTION = """Encrypt files and folders into one bundle. The password is asked twice.
+SEAL_DESCRIPTION = """Encrypt files and folders into one bundle. Unless --generate is used, the
+password is asked twice.
 
 Each PATH is either a file, stored under its base name, or a folder, searched
 recursively with every file stored under its path relative to that folder.
 Entries default to file mode 0600; use --mode to give matching names another
 mode. The bundle is never overwritten unless you pass --force.
+
+With --generate the tool creates the password itself (256 bits of randomness)
+and does not prompt, so no one has to invent or remember it.
 """
 
 SEAL_EPILOG = """--mode details:
@@ -186,7 +238,18 @@ examples:
   ansible-boxcar seal pki.box ./pki --mode 'client/client.key=0600' --mode '*=0644'
   ansible-boxcar seal tls.box ./certs --force      # replace an existing bundle
 
-Passwords must be at least 8 characters; 16 or more is recommended.
+Generated passwords (no prompt, nothing for a person to invent):
+  ansible-boxcar seal tls.box ./certs --generate --password-file tls.pw
+      writes the password to tls.pw (mode 0600) and prints nothing secret
+  PW="$(ansible-boxcar seal tls.box ./certs --generate)"
+      captures the password in a shell variable; only the password is on
+      stdout, status messages go to stderr
+
+The password is shown or written only once, after the bundle is saved. Store it
+at once (a secret manager, or SOPS; see examples/sops-combined): the bundle
+cannot be opened without it. $BOXCAR_PASSWORD cannot be combined with --generate.
+
+Passwords you type must be at least 8 characters; 16 or more is recommended.
 """
 
 UNBOX_DESCRIPTION = """Decrypt a bundle into a local folder, for recovery or inspection (Ansible
@@ -231,8 +294,14 @@ def build_parser() -> argparse.ArgumentParser:
                         metavar="PATTERN=MODE",
                         help="file mode for entry names matching PATTERN; repeatable, "
                              "first match wins (default 0600)")
+    p_seal.add_argument("--generate", action="store_true",
+                        help="create a strong random password instead of prompting; printed "
+                             "once on stdout unless --password-file is given")
+    p_seal.add_argument("--password-file", metavar="FILE",
+                        help="with --generate: write the password to FILE (mode 0600) "
+                             "instead of printing it")
     p_seal.add_argument("--force", action="store_true",
-                        help="replace BUNDLE if it already exists")
+                        help="replace BUNDLE (and --password-file) if they already exist")
     p_seal.set_defaults(func=cmd_seal)
 
     p_unbox = sub.add_parser(

@@ -30,9 +30,9 @@ ansible-galaxy collection install community.sops -p ./collections
 ## Seal (operator, whenever the certificate or key changes)
 
 ```bash
-PW="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"   # strong, never typed
-
-BOXCAR_PASSWORD="$PW" ../../tools/ansible-boxcar seal files/tls.box ./certs --mode '*.crt=0644'
+# --generate makes a strong random password (nobody types or invents it) and prints
+# only that password on stdout; status messages go to stderr.
+PW="$(../../tools/ansible-boxcar seal files/tls.box ./certs --mode '*.crt=0644' --generate)"
 
 printf 'boxcar_password: "%s"\n' "$PW" |
   sops --encrypt --filename-override files/bundle-password.sops.yaml \
@@ -66,11 +66,10 @@ Override defaults with `-e target=... -e tls_dest=/etc/pki/app -e tls_owner=root
 ```bash
 OLD="$(sops -d --extract '["boxcar_password"]' files/bundle-password.sops.yaml)"
 BOXCAR_PASSWORD="$OLD" ../../tools/ansible-boxcar unbox files/tls.box ./work    # protected folder
-NEW="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
-BOXCAR_PASSWORD="$NEW" ../../tools/ansible-boxcar seal files/tls.box ./work --force
-printf 'boxcar_password: "%s"
-' "$NEW" |
-  sops --encrypt --filename-override files/bundle-password.sops.yaml        --input-type yaml --output-type yaml /dev/stdin > files/bundle-password.sops.yaml
+NEW="$(../../tools/ansible-boxcar seal files/tls.box ./work --force --generate)"
+printf 'boxcar_password: "%s"\n' "$NEW" |
+  sops --encrypt --filename-override files/bundle-password.sops.yaml \
+       --input-type yaml --output-type yaml /dev/stdin > files/bundle-password.sops.yaml
 unset OLD NEW; rm -rf ./work
 ```
 
