@@ -287,6 +287,10 @@ change, without writing files.
 
 ### `tools/ansible-boxcar`
 
+Built-in help: `ansible-boxcar --help` lists the commands with examples, and
+`ansible-boxcar seal --help` (likewise `unbox`, `list`) gives the details,
+options and examples of one command.
+
 ```
 ansible-boxcar seal BUNDLE PATH [PATH ...] [--mode PATTERN=MODE ...] [--force]
 ansible-boxcar unbox BUNDLE DEST [--entry NAME ...] [--force]

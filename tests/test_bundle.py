@@ -160,6 +160,19 @@ class Cli(unittest.TestCase):
             self.assertEqual(self.run_cli("seal", out, f).returncode, 1)
             self.assertEqual(self.run_cli("seal", out, f, "--force").returncode, 0)
 
+    def test_help_for_every_command(self):
+        r = self.run_cli()
+        self.assertEqual(r.returncode, 2)  # no command: usage error, help shown
+        self.assertIn("COMMAND", r.stderr)
+        for cmd in ("seal", "unbox", "list"):
+            self.assertIn(cmd, self.run_cli("--help").stdout)
+            r = self.run_cli(cmd, "--help")
+            self.assertEqual(r.returncode, 0, cmd)
+            self.assertIn("usage: ansible-boxcar " + cmd, r.stdout)
+        self.assertIn("--mode", self.run_cli("seal", "--help").stdout)
+        self.assertIn("--entry", self.run_cli("unbox", "--help").stdout)
+        self.assertIn("BOXCAR_PASSWORD", self.run_cli("--help").stdout)
+
     def _sealed(self, d):
         src = os.path.join(d, "certs")
         os.makedirs(os.path.join(src, "sub"))

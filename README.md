@@ -19,6 +19,7 @@ tools/ansible-boxcar list tls.box                               # names + modes,
 tools/ansible-boxcar unbox tls.box ./recovered                  # decrypt locally (recovery/inspection)
 ```
 
+`tools/ansible-boxcar --help` (and `COMMAND --help`) describe every command.
 A folder is stored with paths relative to it; default mode is 0600.
 `tls.box` is safe to keep at rest and to commit.
 

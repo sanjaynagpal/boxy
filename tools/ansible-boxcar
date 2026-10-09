@@ -146,31 +146,122 @@ def cmd_list(args) -> int:
     return 0
 
 
-def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="ansible-boxcar", description=__doc__.split("\n\n")[0])
-    sub = parser.add_subparsers(dest="cmd", required=True)
+TOP_DESCRIPTION = """Seal keys, certificates and PEM files into a password-protected bundle for the
+sanjaynagpal.boxcar Ansible collection, and inspect or recover existing
+bundles. A bundle is safe to keep at rest and to commit to Git; install it on
+hosts with the sanjaynagpal.boxcar.unbox module (see docs/USER-GUIDE.md).
+"""
 
-    p_seal = sub.add_parser("seal", help="encrypt files/folders into a bundle")
-    p_seal.add_argument("bundle")
-    p_seal.add_argument("paths", nargs="+", metavar="PATH")
+TOP_EPILOG = """examples:
+  ansible-boxcar seal files/tls.box ./certs --mode '*.crt=0644'
+  ansible-boxcar list files/tls.box
+  ansible-boxcar unbox files/tls.box ./recovered --entry server.crt
+
+Run "ansible-boxcar COMMAND --help" for the details of one command.
+
+environment:
+  BOXCAR_PASSWORD   use this password instead of prompting (for tests and
+                    automation only; the value is visible to anything that can
+                    read this process's environment)
+
+exit status: 0 success, 1 error (message on stderr), 2 usage error.
+"""
+
+SEAL_DESCRIPTION = """Encrypt files and folders into one bundle. The password is asked twice.
+
+Each PATH is either a file, stored under its base name, or a folder, searched
+recursively with every file stored under its path relative to that folder.
+Entries default to file mode 0600; use --mode to give matching names another
+mode. The bundle is never overwritten unless you pass --force.
+"""
+
+SEAL_EPILOG = """--mode details:
+  PATTERN is a shell-style pattern matched against the entry name (for example
+  '*.crt' or 'client/client.key'); MODE is octal (0600, 0644, ...). Rules are
+  checked in the order given and the first match wins, so put specific
+  patterns before a catch-all such as '*'.
+
+examples:
+  ansible-boxcar seal tls.box server.key server.crt --mode '*.crt=0644'
+  ansible-boxcar seal pki.box ./pki --mode 'client/client.key=0600' --mode '*=0644'
+  ansible-boxcar seal tls.box ./certs --force      # replace an existing bundle
+
+Passwords must be at least 8 characters; 16 or more is recommended.
+"""
+
+UNBOX_DESCRIPTION = """Decrypt a bundle into a local folder, for recovery or inspection (Ansible
+deployments use the sanjaynagpal.boxcar.unbox module instead). The password is
+asked once.
+
+Files are written with the modes recorded in the bundle. Nothing is written
+unless the password and every entry check out, and existing files are never
+overwritten unless you pass --force. DEST is created (mode 0700) if missing.
+"""
+
+UNBOX_EPILOG = """examples:
+  ansible-boxcar unbox tls.box ./recovered
+  ansible-boxcar unbox tls.box ./recovered --entry server.crt --entry server.key
+  ansible-boxcar unbox tls.box ./recovered --force
+
+Treat DEST as sensitive and delete it when you are done. Use
+"ansible-boxcar list BUNDLE" to see the entry names to pass to --entry.
+"""
+
+LIST_DESCRIPTION = """Print each entry's mode and name, one per line. No password is needed: names
+and modes are stored in the clear (only file contents are encrypted).
+"""
+
+
+def build_parser() -> argparse.ArgumentParser:
+    raw = argparse.RawDescriptionHelpFormatter
+    parser = argparse.ArgumentParser(
+        prog="ansible-boxcar", description=TOP_DESCRIPTION, epilog=TOP_EPILOG,
+        formatter_class=raw)
+    sub = parser.add_subparsers(dest="cmd", metavar="COMMAND", title="commands")
+
+    p_seal = sub.add_parser(
+        "seal", help="encrypt files/folders into a bundle (prompts for a password)",
+        formatter_class=raw,
+        description=SEAL_DESCRIPTION, epilog=SEAL_EPILOG)
+    p_seal.add_argument("bundle", metavar="BUNDLE",
+                        help="bundle file to create, e.g. files/tls.box")
+    p_seal.add_argument("paths", nargs="+", metavar="PATH",
+                        help="file or folder to include (one or more)")
     p_seal.add_argument("--mode", action="append", default=[], type=_parse_mode_rule,
-                        metavar="PATTERN=MODE", help="file mode for matching entry names")
-    p_seal.add_argument("--force", action="store_true", help="replace an existing bundle")
+                        metavar="PATTERN=MODE",
+                        help="file mode for entry names matching PATTERN; repeatable, "
+                             "first match wins (default 0600)")
+    p_seal.add_argument("--force", action="store_true",
+                        help="replace BUNDLE if it already exists")
     p_seal.set_defaults(func=cmd_seal)
 
-    p_unbox = sub.add_parser("unbox", help="decrypt a bundle into a local folder")
-    p_unbox.add_argument("bundle")
-    p_unbox.add_argument("dest", metavar="DEST")
+    p_unbox = sub.add_parser(
+        "unbox", help="decrypt a bundle into a local folder (prompts for a password)",
+        formatter_class=raw,
+        description=UNBOX_DESCRIPTION, epilog=UNBOX_EPILOG)
+    p_unbox.add_argument("bundle", metavar="BUNDLE", help="bundle file to open")
+    p_unbox.add_argument("dest", metavar="DEST",
+                         help="folder to write the files into (created if missing)")
     p_unbox.add_argument("--entry", action="append", default=[], metavar="NAME",
-                         help="only this entry (repeatable); default is all")
-    p_unbox.add_argument("--force", action="store_true", help="overwrite existing files")
+                         help="only extract this entry; repeatable (default: all)")
+    p_unbox.add_argument("--force", action="store_true",
+                         help="overwrite files that already exist in DEST")
     p_unbox.set_defaults(func=cmd_unbox)
 
-    p_list = sub.add_parser("list", help="list entry names and modes (no password needed)")
-    p_list.add_argument("bundle")
+    p_list = sub.add_parser(
+        "list", help="list entry names and modes (no password needed)",
+        formatter_class=raw, description=LIST_DESCRIPTION)
+    p_list.add_argument("bundle", metavar="BUNDLE", help="bundle file to inspect")
     p_list.set_defaults(func=cmd_list)
+    return parser
 
+
+def main(argv=None) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
+    if not args.cmd:
+        parser.print_help(sys.stderr)
+        return 2
     try:
         return args.func(args)
     except bundle.BundleError as exc:
