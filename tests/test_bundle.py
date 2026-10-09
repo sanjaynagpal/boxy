@@ -160,6 +160,61 @@ class Cli(unittest.TestCase):
             self.assertEqual(self.run_cli("seal", out, f).returncode, 1)
             self.assertEqual(self.run_cli("seal", out, f, "--force").returncode, 0)
 
+    def _sealed(self, d):
+        src = os.path.join(d, "certs")
+        os.makedirs(os.path.join(src, "sub"))
+        for rel, body in (("a.pem", "A"), ("sub/b.key", "B")):
+            with open(os.path.join(src, rel), "w") as fh:
+                fh.write(body)
+        out = os.path.join(d, "x.box")
+        self.assertEqual(self.run_cli("seal", out, src, "--mode", "*.pem=0644").returncode, 0)
+        return out
+
+    def test_unbox_round_trip(self):
+        with tempfile.TemporaryDirectory() as d:
+            out, dest = self._sealed(d), os.path.join(d, "dest")
+            r = self.run_cli("unbox", out, dest)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            with open(os.path.join(dest, "a.pem")) as fh:
+                self.assertEqual(fh.read(), "A")
+            with open(os.path.join(dest, "sub", "b.key")) as fh:
+                self.assertEqual(fh.read(), "B")
+            if os.name == "posix":
+                self.assertEqual(os.stat(os.path.join(dest, "a.pem")).st_mode & 0o777, 0o644)
+                self.assertEqual(os.stat(os.path.join(dest, "sub", "b.key")).st_mode & 0o777, 0o600)
+
+    def test_unbox_wrong_password_writes_nothing(self):
+        with tempfile.TemporaryDirectory() as d:
+            out, dest = self._sealed(d), os.path.join(d, "dest")
+            r = self.run_cli("unbox", out, dest, password="not the password")
+            self.assertEqual(r.returncode, 1)
+            self.assertFalse(os.path.exists(dest))
+
+    def test_unbox_refuses_overwrite_without_writing_anything(self):
+        with tempfile.TemporaryDirectory() as d:
+            out, dest = self._sealed(d), os.path.join(d, "dest")
+            os.makedirs(os.path.join(dest, "sub"))
+            with open(os.path.join(dest, "sub", "b.key"), "w") as fh:
+                fh.write("existing")
+            r = self.run_cli("unbox", out, dest)
+            self.assertEqual(r.returncode, 1)
+            self.assertFalse(os.path.exists(os.path.join(dest, "a.pem")))  # nothing half-written
+            with open(os.path.join(dest, "sub", "b.key")) as fh:
+                self.assertEqual(fh.read(), "existing")
+            self.assertEqual(self.run_cli("unbox", out, dest, "--force").returncode, 0)
+            with open(os.path.join(dest, "sub", "b.key")) as fh:
+                self.assertEqual(fh.read(), "B")
+
+    def test_unbox_entry_filter(self):
+        with tempfile.TemporaryDirectory() as d:
+            out, dest = self._sealed(d), os.path.join(d, "dest")
+            self.assertEqual(self.run_cli("unbox", out, dest, "--entry", "a.pem").returncode, 0)
+            self.assertTrue(os.path.exists(os.path.join(dest, "a.pem")))
+            self.assertFalse(os.path.exists(os.path.join(dest, "sub")))
+            r = self.run_cli("unbox", out, os.path.join(d, "d2"), "--entry", "nope")
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("not in bundle", r.stderr)
+
 
 if __name__ == "__main__":
     unittest.main()
