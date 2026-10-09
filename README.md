@@ -49,6 +49,12 @@ Decryption happens on the control node; every entry is authenticated before
 anything is written, so a wrong password changes nothing. Writing is
 delegated to `ansible.builtin.copy`, so it is atomic and idempotent.
 
+## No shared password to invent or store
+
+[`examples/sops-combined`](examples/sops-combined/README.md) shows how to keep
+the bundle password in a SOPS/age-encrypted file instead, so each operator and
+CI job uses its own key.
+
 ## Limits / caveats
 
 - Text entries only (PEM etc.); binary entries are rejected.

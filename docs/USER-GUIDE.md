@@ -255,6 +255,17 @@ skipped automatically when that variable is already supplied with `-e`
 (verified), so the same playbook serves both interactive and automated runs.
 Otherwise omit `vars_prompt` and `password:` and rely on `BOXCAR_PASSWORD`.
 
+### 6a. Avoid choosing or storing a password at all (SOPS)
+
+*Situation:* nobody wants to invent a strong password or keep it in a CI
+secret.
+
+*Do:* generate the bundle password and keep it in a SOPS-encrypted file that
+each operator and CI job opens with its own age key; the playbook reads it with
+the `community.sops.sops` lookup and passes it to `unbox`. Adding or removing a
+person is then a change to the recipient list, not a shared-password change.
+Complete, tested walkthrough: [`examples/sops-combined`](../examples/sops-combined/README.md).
+
 ### 7. Recover or inspect sealed files locally (no Ansible)
 
 *Situation:* the plaintext sources are gone, or you want to check what a

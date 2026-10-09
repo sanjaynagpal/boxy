@@ -1,0 +1,7 @@
+# Who may read the bundle password. One age public key per person or CI job
+# (generate each with `age-keygen`; share only the public key, "age1...").
+creation_rules:
+  - path_regex: files/.*\.sops\.yaml$
+    age: >-
+      age1REPLACE_WITH_OPERATOR_PUBLIC_KEY,
+      age1REPLACE_WITH_CI_JOB_PUBLIC_KEY
