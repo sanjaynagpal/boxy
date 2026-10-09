@@ -1,0 +1,21 @@
+# Deploy a sealed bundle whose password is stored in a SOPS-encrypted file.
+# Nobody types or exports the bundle password: the control node reads it with
+# the SOPS lookup (using its own age key) and hands it to unbox.
+#
+#   ansible-playbook -i inventory.ini deploy.yml
+- hosts: "{{ target | default('webservers') }}"
+  become: "{{ use_become | default(true) }}"
+  vars:
+    # rstrip=false: never alter the stored value. extract pulls one key out of the YAML.
+    bundle_password: >-
+      {{ lookup('community.sops.sops', 'bundle-password.sops.yaml',
+                extract='["boxcar_password"]', rstrip=false) }}
+  tasks:
+    - name: Install TLS material from the sealed bundle
+      sanjaynagpal.boxcar.unbox:
+        src: tls.box
+        dest: "{{ tls_dest | default('/etc/pki/app') }}"
+        password: "{{ bundle_password }}"
+        owner: "{{ tls_owner | default(omit) }}"
+        group: "{{ tls_group | default(omit) }}"
+      no_log: true
