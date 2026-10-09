@@ -255,7 +255,26 @@ skipped automatically when that variable is already supplied with `-e`
 (verified), so the same playbook serves both interactive and automated runs.
 Otherwise omit `vars_prompt` and `password:` and rely on `BOXCAR_PASSWORD`.
 
-### 7. Verify a deployment without changing anything
+### 7. Recover or inspect sealed files locally (no Ansible)
+
+*Situation:* the plaintext sources are gone, or you want to check what a
+bundle really contains, or you need a certificate for a one-off manual task.
+
+*Do:* unbox it with the same tool that sealed it:
+
+```
+tools/ansible-boxcar list files/tls.box                          # what is inside
+tools/ansible-boxcar unbox files/tls.box ./recovered             # everything
+tools/ansible-boxcar unbox files/tls.box ./recovered --entry server.crt
+```
+
+Files appear with the modes recorded in the bundle (private keys `0600`).
+Treat the output folder as sensitive and delete it when finished. This is also
+how you recover sources before re-sealing a bundle with a new password
+(use case 4): unbox to a protected location, then `seal --force` with the new
+password.
+
+### 8. Verify a deployment without changing anything
 
 ```
 ansible-playbook deploy-tls.yml --check
@@ -268,8 +287,13 @@ change, without writing files.
 
 ### `tools/ansible-boxcar`
 
+Built-in help: `ansible-boxcar --help` lists the commands with examples, and
+`ansible-boxcar seal --help` (likewise `unbox`, `list`) gives the details,
+options and examples of one command.
+
 ```
 ansible-boxcar seal BUNDLE PATH [PATH ...] [--mode PATTERN=MODE ...] [--force]
+ansible-boxcar unbox BUNDLE DEST [--entry NAME ...] [--force]
 ansible-boxcar list BUNDLE
 ```
 
@@ -281,6 +305,12 @@ ansible-boxcar list BUNDLE
   overwritten.
 - Password: at least 8 characters, entered twice. A warning is shown below 16.
   `BOXCAR_PASSWORD` can supply it for non-interactive use.
+- `unbox` decrypts the bundle into the local folder `DEST` (created with mode
+  `0700` if missing), using the modes recorded in the bundle. The password is
+  asked once. Nothing is written unless the password and **every** entry
+  check out; `--entry NAME` (repeatable) restricts it to chosen entries; an
+  existing file is never overwritten unless you pass `--force`, and that check
+  happens before any file is written.
 - Exit status `0` on success, `1` on error with a message on stderr.
 
 ### `sanjaynagpal.boxcar.unbox`
@@ -340,7 +370,8 @@ Current limits:
 - **Text entries only** (PEM and similar). Binary files such as `.p12` or
   `.jks` are rejected with a clear error.
 - The bundle password is derived once per host per play (about 0.1 second).
-- There is no in-place edit or password-change command; re-seal from sources.
+- There is no in-place edit or password-change command; unbox (or use your
+  sources) and re-seal.
 - The bundle format is independent of the Go `boxcar` tool and is not
   interchangeable with its vault files.
 - Tested against ansible-core 2.16 on localhost; run it against a non-production
@@ -357,7 +388,7 @@ Current limits:
 | `only supports text entries (PEM etc.)` | An entry is binary. Convert to PEM, or deliver it another way. |
 | `unsupported parameter(s): ...` | A task option is misspelled. See the parameter table above. |
 | `Could not find or access 'tls.box'` | The bundle is not in `files/` beside the playbook. Put it there or give a path. |
-| `<name> already exists (use --force ...)` | `seal` never overwrites silently. Add `--force` to replace the bundle. |
+| `<name> already exists (use --force ...)` | `seal` and `unbox` never overwrite silently. Add `--force` if replacing is intended. |
 | `The module sanjaynagpal.boxcar.unbox was not found` | The collection is not on `collections_path`. See Quick start step 1. |
 
 **The task fails and the reason is hidden.** `no_log: true` hides errors too.

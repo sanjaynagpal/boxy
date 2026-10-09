@@ -61,6 +61,14 @@ python3 tools/ansible-boxcar seal tls.box src --mode '*.crt=0644' >/dev/null
 check "list shows names and modes" bash -c "python3 tools/ansible-boxcar list tls.box | grep -q '^0644  pki/server.crt' && python3 tools/ansible-boxcar list tls.box | grep -q '^0600  server.key'"
 unset BOXCAR_PASSWORD
 
+echo "== local unbox (CLI)"
+BOXCAR_PASSWORD="$PW" python3 tools/ansible-boxcar unbox tls.box cli1 >/dev/null
+check "CLI unbox restores content" grep -q "$KEYTEXT" cli1/server.key
+check "CLI unbox key mode 0600" test "$(stat -c %a cli1/server.key)" = 600
+check "CLI unbox cert mode 0644" test "$(stat -c %a cli1/pki/server.crt)" = 644
+check "CLI unbox refuses to overwrite" bash -c '! BOXCAR_PASSWORD="$0" python3 tools/ansible-boxcar unbox tls.box cli1' "$PW"
+check "CLI unbox wrong password writes nothing" bash -c '! BOXCAR_PASSWORD=wrong-password-x python3 tools/ansible-boxcar unbox tls.box cli2 && test ! -e cli2'
+
 echo "== install"
 out="$(run play.yml -e "$(vars "$W/o1")")"
 check "first run succeeds with changes" grep -q 'changed=1 .*failed=0' <<<"$out"
