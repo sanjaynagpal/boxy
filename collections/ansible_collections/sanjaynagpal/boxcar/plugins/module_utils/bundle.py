@@ -102,6 +102,11 @@ def check_password(password: bytes) -> None:
         raise BundleError("password must be at least %d characters" % MIN_PASSWORD_LEN)
 
 
+def generate_password() -> str:
+    """Return a random URL-safe password with 256 bits of entropy (43 characters)."""
+    return secrets.token_urlsafe(32)
+
+
 def is_weak_password(password: bytes) -> bool:
     """Advisory only: True if shorter than RECOMMENDED_PASSWORD_LEN."""
     return len(password) < RECOMMENDED_PASSWORD_LEN

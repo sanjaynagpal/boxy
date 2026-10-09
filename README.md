@@ -15,6 +15,7 @@ Targets ansible-core 2.16, Python 3.12. The control node needs the
 
 ```
 tools/ansible-boxcar seal tls.box ./certs --mode '*.crt=0644'   # prompts for password twice
+tools/ansible-boxcar seal tls.box ./certs --generate --password-file tls.pw   # tool creates a strong one
 tools/ansible-boxcar list tls.box                               # names + modes, no password
 tools/ansible-boxcar unbox tls.box ./recovered                  # decrypt locally (recovery/inspection)
 ```

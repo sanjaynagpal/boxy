@@ -43,11 +43,12 @@ pub() { age-keygen -y "$W/$1.key"; }
 sed -i "s/age1REPLACE_WITH_OPERATOR_PUBLIC_KEY/$(pub operator)/; s/age1REPLACE_WITH_CI_JOB_PUBLIC_KEY/$(pub ci)/" .sops.yaml
 
 echo "== seal with a GENERATED password, store it only in SOPS"
-PW="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
 mkdir -p src/pki
 printf -- "-----BEGIN PRIVATE KEY-----\nSECRETKEYMATERIAL\n-----END PRIVATE KEY-----\n" > src/server.key
 printf -- "-----BEGIN CERTIFICATE-----\nCERTBODY\n-----END CERTIFICATE-----\n" > src/pki/server.crt
-BOXCAR_PASSWORD="$PW" python3 "$W/tools/ansible-boxcar" seal files/tls.box src --mode '*.crt=0644' >/dev/null
+unset BOXCAR_PASSWORD
+PW="$(python3 "$W/tools/ansible-boxcar" seal files/tls.box src --mode '*.crt=0644' --generate 2>/dev/null)"
+check "seal --generate printed exactly one strong password" test "$(wc -l <<<"$PW")" = 1 -a "${#PW}" -ge 43
 printf 'boxcar_password: "%s"\n' "$PW" |
   sops --encrypt --filename-override files/bundle-password.sops.yaml \
        --input-type yaml --output-type yaml /dev/stdin > files/bundle-password.sops.yaml
@@ -84,12 +85,11 @@ check "no bundle password in output" bash -c '! grep -q "$0" <<<"$1"' "$PW" "$lo
 check "no key material in output" bash -c '! grep -q SECRETKEYMATERIAL <<<"$0"' "$log"
 
 echo "== password rotation: re-seal + re-encrypt, old bundle/password file pair no longer mixes"
-PW2="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
 cp files/tls.box old.box
 OLD="$(SOPS_AGE_KEY_FILE="$W/operator.key" sops -d --extract '["boxcar_password"]' files/bundle-password.sops.yaml)"
 check "documented sops -d --extract returns the stored password" test "$OLD" = "$PW"
 mkdir -p src2 && BOXCAR_PASSWORD="$OLD" python3 "$W/tools/ansible-boxcar" unbox old.box src2 >/dev/null
-BOXCAR_PASSWORD="$PW2" python3 "$W/tools/ansible-boxcar" seal files/tls.box src2 --force >/dev/null
+PW2="$(python3 "$W/tools/ansible-boxcar" seal files/tls.box src2 --force --generate 2>/dev/null)"
 check "stale password file cannot open the re-sealed bundle" grep -q 'failed=1' <<<"$(SOPS_AGE_KEY_FILE="$W/operator.key" run "$W/out-rot")"
 printf 'boxcar_password: "%s"\n' "$PW2" |
   sops --encrypt --filename-override files/bundle-password.sops.yaml \

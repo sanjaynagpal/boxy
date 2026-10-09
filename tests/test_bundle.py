@@ -173,6 +173,66 @@ class Cli(unittest.TestCase):
         self.assertIn("--entry", self.run_cli("unbox", "--help").stdout)
         self.assertIn("BOXCAR_PASSWORD", self.run_cli("--help").stdout)
 
+    def run_cli_nopw(self, *args):
+        env = {k: v for k, v in os.environ.items() if k != "BOXCAR_PASSWORD"}
+        return subprocess.run([sys.executable, os.path.join(ROOT, "tools", "ansible-boxcar"), *args],
+                              capture_output=True, text=True, env=env)
+
+    def _one_file(self, d):
+        f = os.path.join(d, "f.pem")
+        with open(f, "w") as fh:
+            fh.write("x")
+        return f
+
+    def test_generate_prints_only_the_password_on_stdout_and_it_opens_the_bundle(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = os.path.join(d, "x.box")
+            r = self.run_cli_nopw("seal", out, self._one_file(d), "--generate")
+            self.assertEqual(r.returncode, 0, r.stderr)
+            pw = r.stdout.strip()
+            self.assertEqual(len(r.stdout.splitlines()), 1)
+            self.assertGreaterEqual(len(pw), 43)
+            self.assertNotIn(pw, r.stderr)
+            self.assertEqual(bundle.open_bundle(bundle.load(out), pw.encode())[0].data, b"x")
+
+    def test_generate_passwords_differ(self):
+        with tempfile.TemporaryDirectory() as d:
+            f = self._one_file(d)
+            a = self.run_cli_nopw("seal", os.path.join(d, "a.box"), f, "--generate").stdout
+            b = self.run_cli_nopw("seal", os.path.join(d, "b.box"), f, "--generate").stdout
+            self.assertNotEqual(a, b)
+
+    def test_generate_password_file(self):
+        with tempfile.TemporaryDirectory() as d:
+            out, pwf = os.path.join(d, "x.box"), os.path.join(d, "x.pw")
+            r = self.run_cli_nopw("seal", out, self._one_file(d), "--generate", "--password-file", pwf)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            with open(pwf) as fh:
+                pw = fh.read().strip()
+            self.assertEqual(r.stdout, "")  # secret not printed
+            self.assertNotIn(pw, r.stderr)
+            if os.name == "posix":
+                self.assertEqual(os.stat(pwf).st_mode & 0o777, 0o600)
+            self.assertEqual(bundle.open_bundle(bundle.load(out), pw.encode())[0].data, b"x")
+
+    def test_generate_refuses_clobbering_and_conflicts(self):
+        with tempfile.TemporaryDirectory() as d:
+            f, out, pwf = self._one_file(d), os.path.join(d, "x.box"), os.path.join(d, "x.pw")
+            with open(pwf, "w") as fh:
+                fh.write("precious")
+            r = self.run_cli_nopw("seal", out, f, "--generate", "--password-file", pwf)
+            self.assertEqual(r.returncode, 1)
+            self.assertFalse(os.path.exists(out))  # nothing created
+            with open(pwf) as fh:
+                self.assertEqual(fh.read(), "precious")  # untouched
+            self.assertEqual(self.run_cli_nopw("seal", out, f, "--generate", "--password-file", pwf,
+                                               "--force").returncode, 0)
+            self.assertEqual(self.run_cli_nopw("seal", os.path.join(d, "y.box"), f,
+                                               "--password-file", pwf).returncode, 1)
+            r = self.run_cli("seal", os.path.join(d, "z.box"), f, "--generate")  # env password set
+            self.assertEqual(r.returncode, 1)
+            self.assertIn("BOXCAR_PASSWORD", r.stderr)
+
     def _sealed(self, d):
         src = os.path.join(d, "certs")
         os.makedirs(os.path.join(src, "sub"))
