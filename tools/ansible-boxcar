@@ -1,0 +1,126 @@
+#!/usr/bin/env python3
+"""ansible-boxcar: seal files and folders into a bundle for the
+sanjaynagpal.boxcar Ansible collection, and inspect existing bundles.
+
+  ansible-boxcar seal BUNDLE PATH [PATH ...] [--mode PATTERN=MODE ...] [--force]
+  ansible-boxcar list BUNDLE
+
+`seal` prompts for the bundle password (twice) on the terminal. For
+unattended testing only, $BOXCAR_PASSWORD supplies it instead.
+
+A file PATH is stored under its base name; a directory PATH is walked
+recursively and each file is stored under its path relative to that
+directory. Entries default to mode 0600; use --mode to override by
+fnmatch pattern on the entry name (first match wins), e.g.
+  --mode '*.pem=0644' --mode '*.key=0600'
+"""
+from __future__ import annotations
+
+import argparse
+import fnmatch
+import getpass
+import os
+import sys
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(
+    _HERE, os.pardir, "collections", "ansible_collections", "sanjaynagpal", "boxcar",
+    "plugins", "module_utils"))
+
+import bundle  # noqa: E402
+
+
+def _read_password(confirm: bool) -> bytes:
+    env = os.environ.get("BOXCAR_PASSWORD")
+    if env:
+        return env.encode("utf-8")
+    first = getpass.getpass("Bundle password: ")
+    if confirm and getpass.getpass("Confirm password: ") != first:
+        raise bundle.BundleError("passwords do not match")
+    return first.encode("utf-8")
+
+
+def _collect(paths, mode_rules):
+    entries = []
+    for path in paths:
+        if os.path.isdir(path):
+            sources = []
+            for root, dirs, files in os.walk(path):
+                dirs.sort()
+                for fname in sorted(files):
+                    full = os.path.join(root, fname)
+                    if os.path.isfile(full):
+                        rel = os.path.relpath(full, path).replace(os.sep, "/")
+                        sources.append((rel, full))
+        elif os.path.isfile(path):
+            sources = [(os.path.basename(path), path)]
+        else:
+            raise bundle.BundleError("no such file or folder: %s" % path)
+        if not sources:
+            raise bundle.BundleError("folder %s contains no files" % path)
+        for name, full in sources:
+            with open(full, "rb") as fh:
+                data = fh.read()
+            mode = next((m for pat, m in mode_rules if fnmatch.fnmatchcase(name, pat)),
+                        bundle.DEFAULT_MODE)
+            entries.append(bundle.Entry(name, mode, data))
+    return entries
+
+
+def _parse_mode_rule(text):
+    pattern, sep, mode = text.partition("=")
+    if not sep or not pattern:
+        raise argparse.ArgumentTypeError("expected PATTERN=MODE, got %r" % text)
+    try:
+        return pattern, bundle.parse_mode(mode)
+    except bundle.BundleError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from None
+
+
+def cmd_seal(args) -> int:
+    if os.path.exists(args.bundle) and not args.force:
+        raise bundle.BundleError("%s already exists (use --force to replace it)" % args.bundle)
+    entries = _collect(args.paths, args.mode)
+    password = _read_password(confirm=True)
+    if bundle.is_weak_password(password):
+        print("warning: password is shorter than %d characters; a longer passphrase is "
+              "recommended" % bundle.RECOMMENDED_PASSWORD_LEN, file=sys.stderr)
+    bundle.save(args.bundle, bundle.seal(entries, password))
+    print("sealed %d file(s) into %s" % (len(entries), args.bundle))
+    return 0
+
+
+def cmd_list(args) -> int:
+    for name, mode in bundle.list_entries(bundle.load(args.bundle)):
+        print("%04o  %s" % (mode, name))
+    return 0
+
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(prog="ansible-boxcar", description=__doc__.split("\n\n")[0])
+    sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_seal = sub.add_parser("seal", help="encrypt files/folders into a bundle")
+    p_seal.add_argument("bundle")
+    p_seal.add_argument("paths", nargs="+", metavar="PATH")
+    p_seal.add_argument("--mode", action="append", default=[], type=_parse_mode_rule,
+                        metavar="PATTERN=MODE", help="file mode for matching entry names")
+    p_seal.add_argument("--force", action="store_true", help="replace an existing bundle")
+    p_seal.set_defaults(func=cmd_seal)
+
+    p_list = sub.add_parser("list", help="list entry names and modes (no password needed)")
+    p_list.add_argument("bundle")
+    p_list.set_defaults(func=cmd_list)
+
+    args = parser.parse_args(argv)
+    try:
+        return args.func(args)
+    except bundle.BundleError as exc:
+        print("error:", exc, file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        return 130
+
+
+if __name__ == "__main__":
+    sys.exit(main())

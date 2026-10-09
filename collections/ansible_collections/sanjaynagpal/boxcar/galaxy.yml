@@ -1,0 +1,13 @@
+namespace: sanjaynagpal
+name: boxcar
+version: 0.1.0
+readme: README.md
+authors:
+  - Sanjay Nagpal
+description: Password-sealed bundles of keys and certificates, unboxed on managed hosts.
+license:
+  - MIT
+tags:
+  - security
+  - secrets
+dependencies: {}
