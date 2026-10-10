@@ -54,7 +54,8 @@ delegated to `ansible.builtin.copy`, so it is atomic and idempotent.
 
 [`examples/sops-combined`](examples/sops-combined/README.md) shows how to keep
 the bundle password in a SOPS/age-encrypted file instead, so each operator and
-CI job uses its own key.
+CI job uses its own key. [docs/SOPS-AGE.md](docs/SOPS-AGE.md) explains how that
+works, key rotation, and why the file is safe to commit.
 
 ## Limits / caveats
 
